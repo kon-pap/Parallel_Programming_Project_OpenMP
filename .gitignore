@@ -1,0 +1,17 @@
+*.o
+*.a
+*.env
+
+perf.*
+*.plist
+*.json
+
+sequential
+omp
+hybrid
+mpi
+
+sequential_submission
+omp_submission
+mpi_submission
+hybrid_submission
