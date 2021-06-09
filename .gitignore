@@ -5,6 +5,8 @@
 perf.*
 *.plist
 *.json
+*.out
+*.prof
 
 sequential
 omp
