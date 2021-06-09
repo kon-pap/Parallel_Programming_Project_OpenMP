@@ -21,6 +21,11 @@ gprof_sequential: kdtree_sequential.cpp Node.cpp Node.hpp
 	$(CXX) $(CXX_FLAGS) -pg -o sequential kdtree_sequential.cpp Node.cpp Utility.cpp
 	echo "1" | ./sequential 
 	gprof sequential gmon.out > gprof_sequential_analysis.prof
+
+perf_sequential: kdtree_sequential.cpp Node.cpp Node.hpp
+	$(CXX) $(CXX_FLAGS) -o sequential kdtree_sequential.cpp Node.cpp Utility.cpp
+	echo "1" | perf record -o perf_sequential_analysis.prof ./sequential 
+	perf report -i perf_sequential_analysis.prof
 #-----------------------------------------------------------------------------------------#
 
 
@@ -35,6 +40,12 @@ gprof_omp: kdtree_omp.cpp Node.cpp Node.hpp
 	$(CXX) $(CXX_FLAGS) $(OPENMP) -pg -o omp kdtree_omp.cpp Node.cpp Utility.cpp
 	echo "1" | ./omp 
 	gprof omp gmon.out > gprof_omp_analysis.prof
+
+
+perf_omp: kdtree_omp.cpp Node.cpp Node.hpp
+	$(CXX) $(CXX_FLAGS) $(OPENMP) -o omp kdtree_omp.cpp Node.cpp Utility.cpp
+	echo "1" | perf record -o perf_omp_analysis.prof ./omp 
+	perf report -i perf_omp_analysis.prof
 #-----------------------------------------------------------------------------------------#
 
 
