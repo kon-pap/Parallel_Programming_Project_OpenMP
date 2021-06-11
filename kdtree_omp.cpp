@@ -10,7 +10,6 @@
 
 #define DEBUG 0
 
-
 /***************************************************************************************/
 float Point::distance_squared(Point &a, Point &b){
     if(a.dimension != b.dimension){
@@ -56,13 +55,19 @@ Node* build_tree_rec(Point** point_list, int num_points, int depth){
     int num_points_left = num_points / 2;
     int num_points_right = num_points - (num_points / 2) - 1; 
 
+    Node* left_node;
+    Node * right_node;
+
     // left subtree
-    Node* left_node = build_tree_rec(left_points, num_points_left, depth + 1);
+    #pragma omp task shared(left_node) if(depth<= 5)
+    left_node = build_tree_rec(left_points, num_points_left, depth + 1);
     
     // right subtree
-    Node* right_node = build_tree_rec(right_points, num_points_right, depth + 1);
+    #pragma omp task shared(right_node) if(depth<= 5)
+    right_node = build_tree_rec(right_points, num_points_right, depth + 1);
 
     // return median node
+    #pragma omp taskwait
     return new Node(*median, left_node, right_node); 
 }
 
@@ -162,8 +167,14 @@ int main(int argc, char **argv){
         points[n] = new Point(dim, n + 1, x + n * dim);
     }
 
-    // build tree
-    Node* tree = build_tree(points, num_points);
+    Node* tree;
+    omp_set_num_threads(32);
+    #pragma omp parallel
+    {
+        // build tree
+        #pragma omp single
+        tree = build_tree(points, num_points);
+    }
     
     // for each query, find nearest neighbor
     #pragma omp parallel for ordered
