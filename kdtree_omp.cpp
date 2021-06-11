@@ -5,6 +5,8 @@
 #include <random>
 #include <math.h>
 #include <omp.h>
+#include <immintrin.h>
+#include <smmintrin.h>
 
 #include "Utility.hpp"
 
@@ -17,9 +19,26 @@ float Point::distance_squared(Point &a, Point &b){
         exit(1);
     }
     float dist = 0;
-    for(int i = 0; i < a.dimension; ++i){
-        float tmp = a.coordinates[i] - b.coordinates[i];
-        dist += tmp * tmp;
+
+    __m256 partial_sum = _mm256_set1_ps(0);
+
+    for(int i = 0; i < a.dimension; i+=8){
+        float * aaddr = &(a.coordinates[i]);
+        __m256 a_i  = _mm256_loadu_ps(aaddr);
+
+        float * baddr = &(b.coordinates[i]);
+        __m256 b_i  = _mm256_loadu_ps(baddr);
+
+        __m256 tmp = _mm256_sub_ps(a_i, b_i);
+
+        __m256 mul = _mm256_mul_ps(tmp, tmp);
+
+        partial_sum = _mm256_add_ps(mul, partial_sum);
+    }
+
+    for (int i = 0; i < 8; i++)
+    {
+        dist += partial_sum[i];
     }
     return dist;
 }
