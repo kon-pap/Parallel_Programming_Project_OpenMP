@@ -10,11 +10,6 @@
 
 #define DEBUG 0
 
-#pragma omp declare simd
-float squared(float number) {
-    return number * number;
-}
-
 /***************************************************************************************/
 float Point::distance_squared(Point &a, Point &b){
     if(a.dimension != b.dimension){
@@ -22,10 +17,16 @@ float Point::distance_squared(Point &a, Point &b){
         exit(1);
     }
     float dist = 0;
-#pragma omp  simd reduction(+:dist)
+
+    /*
+     * Vectorizing loop computing squared distance
+     * and collecting the sum of all dist to one
+     * using reduction directive
+    */
+    #pragma omp simd reduction(+:dist)
     for(int i = 0; i < a.dimension; ++i){
         float tmp = a.coordinates[i] - b.coordinates[i];
-        dist += squared(tmp);
+        dist += tmp * tmp;
     }
     return dist;
 }
@@ -39,7 +40,7 @@ Node* build_tree_rec(Point** point_list, int num_points, int depth){
     }
 
     if (num_points == 1){
-        return new Node(point_list[0], nullptr, nullptr);
+        return new Node(point_list[0], nullptr, nullptr); 
     }
 
     int dim = point_list[0]->dimension;
@@ -50,8 +51,8 @@ Node* build_tree_rec(Point** point_list, int num_points, int depth){
     using std::placeholders::_2;
 
     std::sort(
-            point_list, point_list + (num_points - 1),
-            std::bind(Point::compare, _1, _2, axis));
+        point_list, point_list + (num_points - 1),
+        std::bind(Point::compare, _1, _2, axis));
 
     // select median
     Point** median = point_list + (num_points / 2);
@@ -59,22 +60,36 @@ Node* build_tree_rec(Point** point_list, int num_points, int depth){
     Point** right_points = median + 1;
 
     int num_points_left = num_points / 2;
-    int num_points_right = num_points - (num_points / 2) - 1;
+    int num_points_right = num_points - (num_points / 2) - 1; 
 
+    /*
+     * Declaring left_node & right_node early so that
+     * they can be used outside the scope of omp task
+    */
     Node* left_node;
     Node * right_node;
 
+    /*
+     * Defining left_node & right node as shared variables
+     * because otherwise they would be firstprivate
+     * Maximum depth is set to 8 after trial and error
+    */
     // left subtree
-#pragma omp task shared(left_node) if(depth<= 8)
+    #pragma omp task shared(left_node) if(depth < 8)
     left_node = build_tree_rec(left_points, num_points_left, depth + 1);
-
+    
     // right subtree
-#pragma omp task shared(right_node) if(depth<= 8)
+    #pragma omp task shared(right_node) if(depth < 8)
     right_node = build_tree_rec(right_points, num_points_right, depth + 1);
 
+    /*
+     * Before returning the subtree both the left and
+     * the right child should have finished creating their
+     * subtrees
+    */
     // return median node
-#pragma omp taskwait
-    return new Node(*median, left_node, right_node);
+    #pragma omp taskwait
+    return new Node(*median, left_node, right_node); 
 }
 
 Node* build_tree(Point** point_list, int num_nodes){
@@ -87,7 +102,7 @@ Node* build_tree(Point** point_list, int num_nodes){
 Node* nearest(Node* root, Point* query, int depth, Node* best, float &best_dist) {
     // leaf node
     if (root == nullptr){
-        return nullptr;
+        return nullptr; 
     }
 
     int dim = query->dimension;
@@ -155,15 +170,15 @@ int main(int argc, char **argv){
     int num_points = 0;
     int num_queries = 10;
 
-#if DEBUG
-    // for measuring your local runtime
+    #if DEBUG
+        // for measuring your local runtime
         auto tick = std::chrono::high_resolution_clock::now();
         Utility::specify_problem(argc, argv, &seed, &dim, &num_points);
-
-#else
-    Utility::specify_problem(&seed, &dim, &num_points);
-
-#endif
+    
+    #else
+        Utility::specify_problem(&seed, &dim, &num_points);
+    
+    #endif
 
     // last points are query
     float* x = Utility::generate_problem(seed, dim, num_points + num_queries);
@@ -173,17 +188,38 @@ int main(int argc, char **argv){
         points[n] = new Point(dim, n + 1, x + n * dim);
     }
 
+    /*
+     * Declaring tree so that it can be outside omp parallel scope
+     * By default tree is shared
+    */
     Node* tree;
+
+    /*
+     * Setting number of threads to 64
+     * Even though the submission server offers 32 CPUs
+     * it seemed that the performance was better with > 32 threads
+     * That may be caused due to the unequal size of problems solved
+     * by each thread when building the tree
+    */
     omp_set_num_threads(64);
-#pragma omp parallel
+    #pragma omp parallel
     {
-        // build tree
-#pragma omp single
+        /*
+         * Building the tree
+         * Starting by initializing the routine using one thread
+        */
+        #pragma omp single
         tree = build_tree(points, num_points);
     }
 
-    // for each query, find nearest neighbor
-#pragma omp parallel for ordered
+    /*
+     * Parallelizing for loop in order to solve the queries
+     * "concurrently", while making sure the results are printed
+     * in the requested order (ordered parameter)
+     * By default its thread will get num_queries/threads iterations
+     * and the scheduling will be static
+    */
+    #pragma omp parallel for ordered
     for(int q = 0; q < num_queries; ++q){
         float* x_query = x + (num_points + q) * dim;
         Point query(dim, num_points + q, x_query);
@@ -193,25 +229,29 @@ int main(int argc, char **argv){
         // output min-distance (i.e. to query point)
         float min_distance = query.distance(*res->point);
 
-#pragma omp ordered
+        /*
+         * Sets a "barrier" making sure the loop iterations are
+         * executed the way the loop executes in a sequential way
+        */
+        #pragma omp ordered
         {
             Utility::print_result_line(query.ID, min_distance);
         }
 
-#if DEBUG
-        // in case you want to have further debug information about
+        #if DEBUG
+            // in case you want to have further debug information about
             // the query point and the nearest neighbor
             // std::cout << "Query: " << query << std::endl;
             // std::cout << "NN: " << *res->point << std::endl << std::endl;
-#endif
+        #endif
     }
 
-#if DEBUG
-    // for measuring your local runtime
+    #if DEBUG
+        // for measuring your local runtime
         auto tock = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> elapsed_time = tock - tick;
         std::cout << "elapsed time " << elapsed_time.count() << " second" << std::endl;
-#endif
+    #endif
 
     std::cout << "DONE" << std::endl;
 
